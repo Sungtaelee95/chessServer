@@ -1,0 +1,7 @@
+package model
+
+enum class Header(val byte: Byte) {
+    GET_SLOW_COLOR(0xC1.toByte()),
+    SEND_MOVE_SLOW_HEADER(0xC2.toByte()),
+    RECEIVE_MOVE_HEADER(0xC3.toByte())
+}

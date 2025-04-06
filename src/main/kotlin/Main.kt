@@ -1,9 +1,9 @@
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import model.Header
 import model.data.MoveInformation
 import model.data.PieceColor
-import java.io.BufferedReader
 import java.io.PrintWriter
 import java.net.ServerSocket
 import java.net.Socket
@@ -26,9 +26,7 @@ class Server() {
             val client = Client(clientSocket, this)
             _clients.add(client)
             CoroutineScope(Dispatchers.IO).launch {
-                launch {
-                    client.receiveClientMessage()
-                }
+                client.receiveClientMessage()
             }
         }
     }
@@ -49,7 +47,8 @@ class Server() {
 }
 
 class Client(
-    private val socket: Socket, private val server: Server
+    private val socket: Socket,
+    private val server: Server
 ) {
 
     fun receiveClientMessage() {
@@ -57,15 +56,13 @@ class Client(
             while (true) {
                 val br = socket.inputStream.bufferedReader()
                 val header = br.readLine() ?: break
-                println(header)
                 when (header.toByte()) {
-                    Header.GET_SLOW_COLOR.byte -> sendPieceColor(br)
-                    Header.SEND_MOVE_SLOW_HEADER.byte -> receiveMoveInformation(br)
+                    Header.GET_SLOW_COLOR.byte -> getSlowColor()
+                    Header.SEND_MOVE_SLOW_HEADER.byte -> receiveMoveInformation()
                     else -> throw CommendException()
                 }
             }
         } catch (e: Exception) {
-            disconnect()
             println("${socket.inetAddress}::${socket.port} 통신 오류로 인한 연결 해제: ${e.message}")
         } finally {
             disconnect()
@@ -74,14 +71,15 @@ class Client(
 
     }
 
-    private fun sendPieceColor(br: BufferedReader) {
+    private fun getSlowColor() {
         val pw = PrintWriter(socket.outputStream, true)
+        val br = socket.getInputStream().bufferedReader()
         val sizeArray = ByteArray(ProtocolSetting.DATA_LENGTH.value) { br.readLine().toByte() }
-        val size = ByteBuffer.wrap(sizeArray).int
+        val size = ByteBuffer.wrap(sizeArray).getInt()
         val contentArray = ByteArray(size) { br.readLine().toByte() }
-        println("여기 실행됨.....")
         try {
-            pw.println(server.getPieceColor().value)
+            pw.println(server.getPieceColor().colorByte)
+            println("색상값 전달함.")
         } catch (e: Exception) {
             println(e.message)
             println("컬러 전달 간 오류")
@@ -89,8 +87,9 @@ class Client(
         }
     }
 
-    private fun receiveMoveInformation(br: BufferedReader) {
+    private fun receiveMoveInformation() {
         try {
+            val br = socket.getInputStream().bufferedReader()
             val sizeArray = ByteArray(ProtocolSetting.DATA_LENGTH.value) { br.readLine().toByte() }
             val size = ByteBuffer.wrap(sizeArray).int
             val inputData = ByteArray(size) { br.readLine().toByte() }
@@ -126,12 +125,12 @@ class Client(
 
 }
 
-enum class Header(val byte: Byte) {
-    GET_SLOW_COLOR(0xC1.toByte()), SEND_MOVE_SLOW_HEADER(0xC2.toByte()), RECEIVE_MOVE_HEADER(0xC3.toByte())
-}
 
 enum class ProtocolSetting(val value: Int) {
-    DATA_LENGTH(4), POSITION_DATA_LENGTH(4), COLOR_DATA_LENGTH(1)
+    HEAD_LENGTH(1),
+    DATA_LENGTH(4),
+    POSITION_DATA_LENGTH(4),
+    COLOR_DATA_LENGTH(1)
 }
 
 class CommendException() : Exception()
