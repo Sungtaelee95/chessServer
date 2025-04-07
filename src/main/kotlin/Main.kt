@@ -4,6 +4,7 @@ import kotlinx.coroutines.launch
 import model.Header
 import model.data.MoveInformation
 import model.data.PieceColor
+import java.io.InputStream
 import java.io.PrintWriter
 import java.net.ServerSocket
 import java.net.Socket
@@ -54,14 +55,26 @@ class Client(
     fun receiveClientMessage() {
         try {
             while (true) {
-                val br = socket.inputStream.bufferedReader()
-                val header = br.readLine() ?: break
-                when (header.toByte()) {
-                    Header.GET_SLOW_COLOR.byte -> getSlowColor()
-                    Header.SEND_MOVE_SLOW_HEADER.byte -> receiveMoveInformation()
-                    Header.GET_TURN_COLOR.byte -> getTurnColor()
-                    else -> throw CommendException()
+                val inputStream = socket.getInputStream()
+                val buffer = ByteArray(21)
+                val bytesRead = inputStream.read(buffer)
+                if (bytesRead > 0) {
+                    val receivedBytes = buffer.copyOf(bytesRead)
+                    val header = receivedBytes[0] // 첫 번째 바이트는 헤더
+                    val data = receivedBytes.sliceArray(1 until receivedBytes.size) // 나머지 데이터
+                    CoroutineScope(Dispatchers.IO).launch {
+                        when (header) {
+                            // 슬로우
+                            Header.GET_SLOW_CLIENT_COLOR_HEADER.byte -> getSlowColor(inputStream)
+                            Header.SEND_MOVE_SLOW_HEADER.byte -> receiveMoveInformation()
+                            // 일반
+                            Header.GET_TURN_COLOR.byte -> getTurnColor()
+                            Header.GET_CLIENT_COLOR.byte -> getClientColor(data)
+                            else -> throw CommendException()
+                        }
+                    }
                 }
+
             }
         } catch (e: Exception) {
             println("${socket.inetAddress}::${socket.port} 통신 오류로 인한 연결 해제: ${e.message}")
@@ -72,14 +85,35 @@ class Client(
 
     }
 
-    private fun getSlowColor() {
-        val pw = PrintWriter(socket.outputStream, true)
-        val br = socket.getInputStream().bufferedReader()
-        val sizeArray = ByteArray(ProtocolSetting.DATA_LENGTH.value) { br.readLine().toByte() }
+    private fun getClientColor(data: ByteArray) {
+        println("getClientColor()")
+        val sizeArray = ByteArray(ProtocolSetting.DATA_LENGTH.value) { data[it] }
         val size = ByteBuffer.wrap(sizeArray).getInt()
-        val contentArray = ByteArray(size) { br.readLine().toByte() }
+        val contentArray = ByteArray(size) { data[it + size] }
         try {
-            pw.println(server.getPieceColor().colorByte)
+            val sendByteArray = setSendByteArray(Header.GET_CLIENT_COLOR, byteArrayOf(server.getPieceColor().colorByte))
+            CoroutineScope(Dispatchers.IO).launch {
+                val outputStream = socket.getOutputStream()
+                outputStream.write(sendByteArray)
+                outputStream.flush()
+                println("색상값 전달함.")
+            }
+        } catch (e: Exception) {
+            println(e.message)
+            println("컬러 전달 간 오류")
+            socket.close()
+        }
+    }
+
+
+    private fun getSlowColor(inputStream: InputStream) {
+        println("getSlowColor()")
+
+        try {
+            val sendColor = server.getPieceColor().colorByte
+            val sendBytes = setSendByteArray(Header.GET_SLOW_CLIENT_COLOR_HEADER, byteArrayOf(sendColor))
+            socket.getOutputStream().write(sendBytes)
+            socket.getOutputStream().flush()
             println("색상값 전달함.")
         } catch (e: Exception) {
             println(e.message)
@@ -114,17 +148,11 @@ class Client(
     }
 
     fun sendMoveInformation(moveInformation: MoveInformation) {
-        val bytes = moveInformation.toByteArray()
-        val dataLengthByte = ByteBuffer.allocate(ProtocolSetting.DATA_LENGTH.value).putInt(bytes.size).array()
-        val sendBytes = ByteArray(bytes.size + 5) { index ->
-            when (index) {
-                0 -> Header.RECEIVE_MOVE_HEADER.byte
-                in 1..dataLengthByte.size -> dataLengthByte[index - 1]
-                else -> bytes[index - 5]
-            }
+        val sendBytes = setSendByteArray(Header.RECEIVE_MOVE_HEADER, moveInformation.toByteArray())
+        CoroutineScope(Dispatchers.IO).launch {
+            socket.outputStream.write(sendBytes)
+            socket.outputStream.flush()
         }
-        val pw = PrintWriter(socket.outputStream, true)
-        pw.println(sendBytes)
     }
 
     private fun disconnect() {
@@ -134,6 +162,21 @@ class Client(
         println("${socket.inetAddress}:${socket.port} 연결 해제.")
     }
 
+    private fun setSendByteArray(header: Header, content: ByteArray): ByteArray {
+        val dataLengthByte = ByteBuffer
+            .allocate(ProtocolSetting.DATA_LENGTH.value)
+            .putInt(content.size)
+            .array()
+
+        val sendBytes = ByteArray(content.size + 5) { index ->
+            when (index) {
+                0 -> header.byte
+                in 1..dataLengthByte.size -> dataLengthByte[index - 1]
+                else -> content[index - 5]
+            }
+        }
+        return sendBytes
+    }
 }
 
 
