@@ -59,6 +59,7 @@ class Client(
                 when (header.toByte()) {
                     Header.GET_SLOW_COLOR.byte -> getSlowColor()
                     Header.SEND_MOVE_SLOW_HEADER.byte -> receiveMoveInformation()
+                    Header.GET_TURN_COLOR.byte -> getTurnColor()
                     else -> throw CommendException()
                 }
             }
@@ -100,6 +101,16 @@ class Client(
             println("움직임 로직 간 예외 발생 ${e.message}")
             disconnect()
         }
+    }
+
+    private fun getTurnColor() {
+        val pw = PrintWriter(socket.outputStream, true)
+        val br = socket.getInputStream().bufferedReader()
+        val sizeArray = ByteArray(ProtocolSetting.DATA_LENGTH.value) { br.readLine().toByte() }
+        val size = ByteBuffer.wrap(sizeArray).getInt()
+        val contentArray = ByteArray(size) { br.readLine().toByte() }
+
+
     }
 
     fun sendMoveInformation(moveInformation: MoveInformation) {
