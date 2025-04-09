@@ -41,8 +41,6 @@ class Server() {
     fun otherClientSendMoveInformation(client: Client, information: MoveInformation) {
         println("${_clients.size}명의 클라이언트 접속 중......")
         for (otherClient in _clients) {
-            // 내가 왜.... otherClient.sendOtherClientMoveInformation(information) 말고
-            // client.sendOtherClientMoveInformation(information)를 해놓고 몰랐을까....ㅅ..
             if (otherClient != client) otherClient.sendOtherClientMoveInformation(information)
         }
     }
@@ -79,8 +77,9 @@ class Client(
                     val data = receivedBytes.sliceArray(1 until receivedBytes.size) // 나머지 데이터
                     when (header) {
                         // 슬로우
-//                            Header.GET_SLOW_CLIENT_COLOR_HEADER.byte -> getSlowColor(inputStream)
-//                            Header.SEND_MOVE_SLOW_HEADER.byte -> receiveMoveInformation()
+                        Header.GET_TURN_COLOR_SLOW_HEADER.byte -> getTurnColorSlow(inputStream)
+                        Header.GET_SLOW_CLIENT_COLOR_HEADER.byte -> getClientColorSlow(inputStream)
+                        Header.SEND_MOVE_SLOW_HEADER.byte -> receiveMoveInformationSlow(inputStream)
                         // 일반
                         Header.GET_TURN_COLOR_HEADER.byte -> getTurnColor()
                         Header.GET_CLIENT_COLOR_HEADER.byte -> getClientColor(data)
@@ -118,9 +117,9 @@ class Client(
     }
 
 
-    private fun getSlowColor(inputStream: InputStream) {
+    private fun getClientColorSlow(inputStream: InputStream) {
         println("getSlowColor()")
-
+        val content = bytesReceiveSlow(inputStream)
         try {
             val sendColor = server.getPieceColor().colorByte
             val sendBytes = setSendByteArray(Header.GET_SLOW_CLIENT_COLOR_HEADER, byteArrayOf(sendColor))
@@ -134,8 +133,22 @@ class Client(
         }
     }
 
+    private fun receiveMoveInformationSlow(inputStream: InputStream) {
+        println("receiveMoveInformationSlow")
+        try {
+            server.changeTurnColor()
+            val content = bytesReceiveSlow(inputStream)
+            val moveInformation = MoveInformation.fromByteArray(content)
+            println("${socket.port}가 ${moveInformation.oriNode.row},${moveInformation.oriNode.col}에서 ${moveInformation.newNode.row},${moveInformation.newNode.col}로 이동")
+            server.otherClientSendMoveInformation(this@Client, moveInformation)
+        } catch (e: Exception) {
+            println("움직임 로직 간 예외 발생 ${e.message}")
+            disconnect()
+        }
+    }
+
     private fun receiveMoveInformation(data: ByteArray) {
-        println("sendMoveInformation")
+        println("receiveMoveInformation")
         try {
             server.changeTurnColor()
             val sizeArray = ByteArray(ProtocolSetting.DATA_LENGTH.value) { data[it] }
@@ -148,6 +161,16 @@ class Client(
             println("움직임 로직 간 예외 발생 ${e.message}")
             disconnect()
         }
+    }
+
+    private fun getTurnColorSlow(inputStream: InputStream) {
+        println("getTurnColorSlow()")
+        val content = bytesReceiveSlow(inputStream)
+        val turnColor = server.getTurnColor()
+        val sendData = setSendByteArray(Header.GET_TURN_COLOR_HEADER, byteArrayOf(turnColor.colorByte))
+        socket.outputStream.write(sendData)
+        socket.outputStream.flush()
+        println("현재 턴 색상 전달")
     }
 
     private fun getTurnColor() {
@@ -172,6 +195,24 @@ class Client(
         socket.close()
         server.removeClient(this)
         println("${socket.inetAddress}:${socket.port} 연결 해제.")
+    }
+
+    private fun bytesReceiveSlow(inputStream: InputStream): ByteArray {
+        println("bytesReceiveSlow()")
+        val sizeBytes = ByteArray(ProtocolSetting.DATA_LENGTH.value)
+        repeat(ProtocolSetting.DATA_LENGTH.value) { i ->
+            val sizeBuffer = ByteArray(1)
+            val byteRead = inputStream.read(sizeBuffer)
+            if (byteRead > 0) sizeBytes[i] = sizeBuffer[0]
+        }
+        val sizeInt = ByteBuffer.wrap(sizeBytes).getInt()
+        val contentBytes = ByteArray(sizeInt)
+        repeat(sizeInt) { i ->
+            val colorBuffer = ByteArray(1)
+            val byteRead = inputStream.read(colorBuffer)
+            if (byteRead > 0) contentBytes[i] = colorBuffer[0]
+        }
+        return contentBytes
     }
 
     private fun setSendByteArray(header: Header, content: ByteArray): ByteArray {
